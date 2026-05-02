@@ -8,8 +8,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     
-    <script src="./internal_assets/html2canvas.min.js"></script>
-    <script src="./internal_assets/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     
     <style>
         :root {
@@ -396,7 +396,7 @@
     // --- SECURITY & AUTH ---
     function checkAuth() {
         const input = document.getElementById('api-key-input').value;
-        if (input === "2026") { // Ganti dengan password yang diinginkan
+        if (input === "2026") { 
             document.getElementById('auth-overlay').style.display = 'none';
             fetchData();
         } else {
@@ -415,7 +415,6 @@
             if (!state.data.config.holidays) state.data.config.holidays = [];
             if (!state.data.schedule) state.data.schedule = {};
             
-            // Auto fetch public holidays
             fetchPublicHolidays();
             
             setDirty(false);
@@ -520,7 +519,6 @@
                 let val = (state.data.schedule[name] && state.data.schedule[name][dayKey]) ? state.data.schedule[name][dayKey] : "";
                 let prevVal = (state.data.schedule[name] && state.data.schedule[name][prevDayKey]) ? state.data.schedule[name][prevDayKey] : "";
                 
-                // LOGIC SAFETY: M -> P Clash Detection
                 let clashClass = (prevVal === "M" && val === "P") ? "is-clash" : "";
                 
                 let cellClass = isHoliday ? 'is-holiday' : (isSunday ? 'is-sunday' : '');
@@ -567,8 +565,6 @@
         menu.style.display = 'block';
         menu.style.left = e.pageX + 'px';
         menu.style.top = e.pageY + 'px';
-        
-        // Auto-hide menu on click elsewhere
         document.addEventListener('click', () => menu.style.display = 'none', { once: true });
     }
 
@@ -595,14 +591,9 @@
         }
     }
 
-    // --- VISUAL OPTIMIZATION ---
-    // Detect scroll to toggle sticky shadow
     document.getElementById('table-viewport').addEventListener('scroll', function() {
-        if (this.scrollLeft > 5) {
-            this.classList.add('scrolled-right');
-        } else {
-            this.classList.remove('scrolled-right');
-        }
+        if (this.scrollLeft > 5) this.classList.add('scrolled-right');
+        else this.classList.remove('scrolled-right');
     });
 
     function toggleHoliday(dayKey) {
@@ -621,49 +612,81 @@
         }).join('');
     }
 
+    // --- BUG FIX EXPORT FULL PHOTO ---
     async function exportToImage() {
         const area = document.getElementById('capture-area');
         const viewport = document.getElementById('table-viewport');
         const header = document.getElementById('export-header');
         const footer = document.getElementById('capture-footer');
         const loader = document.getElementById('loader');
+        const table = document.getElementById('rekap-table');
         
         loader.style.display = 'flex';
         document.getElementById('loader-text').innerText = "Memproses Gambar...";
         
+        // Reset scroll ke awal sebelum capture agar koordinat tidak meleset
+        viewport.scrollLeft = 0;
+        viewport.scrollTop = 0;
+
         const originalViewportStyle = viewport.getAttribute('style') || '';
         const stickyNames = document.querySelectorAll('.sticky-name');
         
+        // Aktifkan mode cetak
         header.classList.remove('hidden');
         footer.style.display = 'block';
+        
+        // PENTING: Paksa tabel melebar sesuai isi aslinya (agar tidak terpotong lebar layar)
+        const fullWidth = table.scrollWidth + 40; // Tambah padding sedikit
+        area.style.width = fullWidth + 'px';
         viewport.style.maxHeight = 'none';
         viewport.style.overflow = 'visible';
-        stickyNames.forEach(el => el.style.position = 'static');
+        
+        // Nonaktifkan sticky agar data nama tidak menimpa kolom lain saat dicapture
+        stickyNames.forEach(el => {
+            el.style.position = 'static';
+            el.style.borderRight = '1px solid #e2e8f0';
+        });
         
         document.getElementById('print-timestamp').innerText = new Date().toLocaleString('id-ID');
 
-        try {
-            const canvas = await html2canvas(area, {
-                scale: 2,
-                useCORS: true,
-                backgroundColor: "#ffffff",
-                logging: false
-            });
-            const link = document.createElement('a');
-            const monthName = MONTH_NAMES[state.currentDate.getMonth()];
-            const yearName = state.currentDate.getFullYear();
-            link.download = `Jadwal_Bidan_Sampanahan_${monthName}_${yearName}.png`;
-            link.href = canvas.toDataURL('image/png');
-            link.click();
-        } catch (e) {
-            alert("Gagal ekspor gambar.");
-        } finally {
-            header.classList.add('hidden');
-            footer.style.display = 'none';
-            viewport.setAttribute('style', originalViewportStyle);
-            stickyNames.forEach(el => el.style.position = 'sticky');
-            loader.style.display = 'none';
-        }
+        // Tunggu browser selesai render layout baru (0.5 detik)
+        setTimeout(async () => {
+            try {
+                const canvas = await html2canvas(area, {
+                    scale: 2, // Kualitas tinggi
+                    useCORS: true,
+                    backgroundColor: "#ffffff",
+                    logging: false,
+                    width: fullWidth, // Paksa lebar canvas sesuai lebar asli tabel
+                    onclone: (clonedDoc) => {
+                        // Memastikan header di clone terlihat
+                        clonedDoc.getElementById('export-header').classList.remove('hidden');
+                    }
+                });
+                
+                const link = document.createElement('a');
+                const monthName = MONTH_NAMES[state.currentDate.getMonth()];
+                const yearName = state.currentDate.getFullYear();
+                link.download = `Jadwal_Bidan_Sampanahan_${monthName}_${yearName}.png`;
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            } catch (e) {
+                console.error(e);
+                alert("Gagal ekspor gambar.");
+            } finally {
+                // Kembalikan ke layout semula
+                header.classList.add('hidden');
+                footer.style.display = 'none';
+                area.style.width = '';
+                viewport.setAttribute('style', originalViewportStyle);
+                stickyNames.forEach(el => {
+                    el.style.position = 'sticky';
+                    el.style.borderRight = '';
+                });
+                loader.style.display = 'none';
+                document.getElementById('loader-text').innerText = "Sinkronisasi Data...";
+            }
+        }, 500);
     }
 
     function exportToExcel() {
